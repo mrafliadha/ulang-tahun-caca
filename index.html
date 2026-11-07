@@ -1,0 +1,460 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Happy Birthday - Khansa Nafidza AzZahra</title>
+
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Poppins:wght@500;600;700&display=swap" rel="stylesheet">
+
+<style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+
+    html, body {
+        width: 100%;
+        height: 100%;
+        background: #050508;
+        overflow: hidden;
+        font-family: "Poppins", sans-serif;
+    }
+
+    canvas {
+        position: fixed;
+        inset: 0;
+        display: block;
+    }
+
+    #replay {
+        position: fixed;
+        bottom: 22px;
+        left: 50%;
+        transform: translateX(-50%);
+        padding: 9px 22px;
+        font-size: 13px;
+        font-weight: 500;
+        letter-spacing: 1px;
+        color: rgba(255, 255, 255, 0.75);
+        background: rgba(255, 255, 255, 0.06);
+        border: 1px solid rgba(255, 255, 255, 0.25);
+        border-radius: 999px;
+        cursor: pointer;
+        backdrop-filter: blur(4px);
+        transition: background 0.25s, color 0.25s, border-color 0.25s;
+    }
+
+    #replay:hover {
+        color: #fff;
+        background: rgba(255, 255, 255, 0.16);
+        border-color: rgba(255, 255, 255, 0.6);
+    }
+</style>
+</head>
+<body>
+
+<canvas id="c"></canvas>
+<button id="replay" type="button">&#8635; Ulangi Animasi</button>
+
+<script>
+(function () {
+    "use strict";
+
+    const canvas = document.getElementById("c");
+    const ctx = canvas.getContext("2d");
+
+    // ==========================================================
+    // PENGATURAN (silakan diubah)
+    // ==========================================================
+    const opts = {
+        lines: [
+            { text: "HAPPY",                     scale: 1   },
+            { text: "BIRTHDAY !",                scale: 1   },
+            { text: "to Khansa Nafidza AzZahra", scale: 0.4 }
+        ],
+        charSize: 80,          // ukuran dasar (otomatis disesuaikan dengan layar)
+        spacing: 0.2,          // jarak antar huruf (kali ukuran huruf)
+        fontFamily: '"Poppins", "Segoe UI", Arial, sans-serif',
+        fontWeight: 600,
+        background: "rgba(5, 5, 8, 0.28)",   // alpha kecil = jejak cahaya
+        letterStagger: 4,      // jeda antar huruf (dalam frame)
+        particlesPerLetter: 26,
+        gravity: 0.07
+    };
+
+    // Data hasil perhitungan layout
+    const calc = { totalWidth: 1, left: 0 };
+
+    let W = 0, H = 0, dpr = 1;
+    let letters = [];
+    let particles = [];
+    let stars = [];
+    let frame = 0;
+    let ambientTimer = 0;
+
+    // ==========================================================
+    // UTILITAS
+    // ==========================================================
+    const rand = (a, b) => a + Math.random() * (b - a);
+    const easeOutCubic = (t) => 1 - Math.pow(1 - t, 3);
+    const easeOutBack = (t) => {
+        const c1 = 1.70158, c3 = c1 + 1;
+        return 1 + c3 * Math.pow(t - 1, 3) + c1 * Math.pow(t - 1, 2);
+    };
+    const fontOf = (size) => `${opts.fontWeight} ${size}px ${opts.fontFamily}`;
+
+    // ==========================================================
+    // PARTIKEL (ledakan kembang api yang berjatuhan)
+    // ==========================================================
+    function Particle(x, y, vx, vy, hue, life, size) {
+        this.x = x;
+        this.y = y;
+        this.vx = vx;
+        this.vy = vy;
+        this.life = life;
+        this.maxLife = life;
+        this.size = size;
+        this.color = `hsl(${hue}, 80%, 60%)`;
+    }
+
+    Particle.prototype.update = function () {
+        this.vx *= 0.985;
+        this.vy *= 0.985;
+        this.vy += opts.gravity;      // jatuh karena gravitasi
+        this.x += this.vx;
+        this.y += this.vy;
+        this.life--;
+    };
+
+    Particle.prototype.draw = function () {
+        const a = Math.max(this.life / this.maxLife, 0);
+        ctx.globalAlpha = a;
+        ctx.fillStyle = this.color;
+        ctx.beginPath();
+        ctx.arc(this.x, this.y, this.size * (0.4 + 0.6 * a), 0, Math.PI * 2);
+        ctx.fill();
+    };
+
+    function explode(x, y, hue, count) {
+        for (let i = 0; i < count; i++) {
+            const angle = Math.random() * Math.PI * 2;
+            const speed = rand(1, 5.5);
+            particles.push(new Particle(
+                x, y,
+                Math.cos(angle) * speed,
+                Math.sin(angle) * speed - 1,
+                hue + rand(-20, 20),
+                rand(55, 110),
+                rand(1.2, 2.8)
+            ));
+        }
+    }
+
+    function spark(x, y, hue) {
+        // percikan kecil di jejak roket
+        particles.push(new Particle(
+            x + rand(-1.5, 1.5), y,
+            rand(-0.3, 0.3), rand(0.2, 0.9),
+            hue, rand(14, 26), rand(0.8, 1.6)
+        ));
+    }
+
+    // ==========================================================
+    // LETTER(char, x, y)  -> satu huruf = satu "kembang api"
+    // x, y = pojok kiri-atas huruf
+    // ==========================================================
+    function Letter(char, x, y, size) {
+        this.char = char;
+        this.size = size || opts.charSize;
+
+        this.x = x;
+        this.y = y;
+
+        ctx.font = fontOf(this.size);
+        this.dx = ctx.measureText(char).width / 2;   // setengah lebar huruf
+        this.dy = this.size / 2;                     // setengah tinggi huruf
+
+        this.fireworkDy = this.y;                    // tinggi tempat meledak
+
+        // Pelangi: hue dihitung dari posisi horizontal huruf
+        const hue = ((x - calc.left) / calc.totalWidth) * 360;
+        this.hue = hue;
+        this.color = `hsl(${hue}, 80%, 50%)`;
+        this.lightColor = `hsl(${hue}, 80%, 70%)`;
+        this.alphaColor = `hsla(${hue}, 80%, 50%, 0)`;
+
+        this.reset(0);
+    }
+
+    Letter.prototype.reset = function (delay) {
+        this.phase = "firework";     // roket naik -> meledak
+        this.delay = delay || 0;
+        this.tick = 0;
+        this.flash = 0;
+
+        this.startY = H + 20;
+        this.rx = this.x + this.dx;  // posisi roket
+        this.ry = this.startY;
+        this.flightFrames = 42 + Math.round(rand(0, 12));
+    };
+
+    Letter.prototype.step = function () {
+        const cx = this.x + this.dx;
+        const cy = this.fireworkDy + this.dy;
+
+        // ---- Fase menunggu giliran ----
+        if (this.delay > 0) {
+            this.delay--;
+            return;
+        }
+
+        // ---- Fase 1: kembang api (roket naik lalu meledak) ----
+        if (this.phase === "firework") {
+            this.tick++;
+            const p = Math.min(this.tick / this.flightFrames, 1);
+            this.ry = this.startY + (cy - this.startY) * easeOutCubic(p);
+
+            spark(this.rx, this.ry, this.hue);
+
+            // kepala roket
+            ctx.save();
+            ctx.globalCompositeOperation = "lighter";
+            ctx.fillStyle = this.lightColor;
+            ctx.globalAlpha = 1;
+            ctx.beginPath();
+            ctx.arc(this.rx, this.ry, 2.6, 0, Math.PI * 2);
+            ctx.fill();
+            ctx.restore();
+
+            if (p >= 1) {
+                explode(cx, cy, this.hue, opts.particlesPerLetter);
+                this.flash = 1;
+                this.phase = "reveal";
+                this.tick = 0;
+            }
+            return;
+        }
+
+        // ---- Cahaya ledakan (flash) ----
+        if (this.flash > 0) {
+            const r = this.size * (0.6 + (1 - this.flash) * 1.4);
+            const g = ctx.createRadialGradient(cx, cy, 0, cx, cy, r);
+            g.addColorStop(0, this.lightColor);
+            g.addColorStop(1, this.alphaColor);
+            ctx.save();
+            ctx.globalCompositeOperation = "lighter";
+            ctx.globalAlpha = this.flash * 0.85;
+            ctx.fillStyle = g;
+            ctx.beginPath();
+            ctx.arc(cx, cy, r, 0, Math.PI * 2);
+            ctx.fill();
+            ctx.restore();
+            this.flash -= 0.05;
+        }
+
+        // ---- Fase 2: huruf tersusun muncul di tengah partikel ----
+        if (this.phase === "reveal") {
+            this.tick++;
+            const p = Math.min(this.tick / 50, 1);
+            const scale = Math.max(easeOutBack(p), 0);
+
+            ctx.save();
+            ctx.translate(cx, cy);
+            ctx.scale(scale, scale);
+            ctx.globalAlpha = p;
+            ctx.font = fontOf(this.size);
+            ctx.textAlign = "center";
+            ctx.textBaseline = "middle";
+            ctx.shadowColor = this.lightColor;
+            ctx.shadowBlur = 28 * (1 - p) + 12;
+            ctx.fillStyle = this.tick < 14 ? this.lightColor : this.color;
+            ctx.fillText(this.char, 0, 0);
+            ctx.restore();
+
+            if (p >= 1) {
+                this.phase = "idle";
+                this.tick = 0;
+            }
+            return;
+        }
+
+        // ---- Fase 3: idle (berkilau lembut) ----
+        if (this.phase === "idle") {
+            const t = frame / 40 + this.x * 0.02;
+            const bob = Math.sin(t) * 2;
+
+            ctx.save();
+            ctx.translate(cx, cy + bob);
+            ctx.font = fontOf(this.size);
+            ctx.textAlign = "center";
+            ctx.textBaseline = "middle";
+            ctx.shadowColor = this.color;
+            ctx.shadowBlur = 12 + Math.sin(t * 1.3) * 6;
+            ctx.fillStyle = this.color;
+            ctx.fillText(this.char, 0, 0);
+            ctx.restore();
+        }
+    };
+
+    // ==========================================================
+    // LAYOUT (menyusun posisi semua huruf, responsif)
+    // ==========================================================
+    function measureLine(text, size) {
+        ctx.font = fontOf(size);
+        let w = 0;
+        for (const ch of text) w += ctx.measureText(ch).width;
+        return w + (Array.from(text).length - 1) * size * opts.spacing;
+    }
+
+    function layout() {
+        dpr = Math.min(window.devicePixelRatio || 1, 2);
+        W = window.innerWidth;
+        H = window.innerHeight;
+        canvas.width = W * dpr;
+        canvas.height = H * dpr;
+        canvas.style.width = W + "px";
+        canvas.style.height = H + "px";
+        ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+
+        // 1. Tentukan ukuran huruf agar baris terpanjang muat di layar
+        const ref = 100;
+        let maxRatio = 0;
+        opts.lines.forEach((ln) => {
+            const ratio = measureLine(ln.text, ref * ln.scale) / ref;
+            if (ratio > maxRatio) maxRatio = ratio;
+        });
+        const S = Math.min((W * 0.88) / maxRatio, H * 0.14, 110);
+        opts.charSize = S;
+
+        // 2. Hitung tinggi tiap baris & lebar terpanjang
+        const heights = opts.lines.map((ln) => S * ln.scale * (ln.scale < 1 ? 2.2 : 1.35));
+        const totalH = heights.reduce((a, b) => a + b, 0);
+        let maxW = 0;
+        const widths = opts.lines.map((ln) => {
+            const w = measureLine(ln.text, S * ln.scale);
+            if (w > maxW) maxW = w;
+            return w;
+        });
+        calc.totalWidth = maxW;
+        calc.left = (W - maxW) / 2;
+
+        // 3. Buat objek Letter untuk setiap huruf
+        letters = [];
+        let lineTop = (H - totalH) / 2;
+        let index = 0;
+
+        opts.lines.forEach((ln, li) => {
+            const size = S * ln.scale;
+            const y = lineTop + (heights[li] - size) / 2;
+            let x = (W - widths[li]) / 2;
+
+            for (const ch of ln.text) {
+                ctx.font = fontOf(size);
+                const w = ctx.measureText(ch).width;
+                if (ch !== " ") {
+                    const letter = new Letter(ch, x, y, size);
+                    letter.reset(index * opts.letterStagger + Math.round(rand(0, 6)) + 20);
+                    letters.push(letter);
+                    index++;
+                } else {
+                    index += 0.5;
+                }
+                x += w + size * opts.spacing;
+            }
+            lineTop += heights[li];
+        });
+
+        // 4. Bintang latar
+        stars = [];
+        const n = Math.round((W * H) / 14000);
+        for (let i = 0; i < n; i++) {
+            stars.push({ x: rand(0, W), y: rand(0, H), r: rand(0.3, 1.2), p: rand(0, 6.28) });
+        }
+    }
+
+    // ==========================================================
+    // LOOP ANIMASI
+    // ==========================================================
+    function allIdle() {
+        return letters.length > 0 && letters.every((l) => l.phase === "idle");
+    }
+
+    function loop() {
+        frame++;
+
+        // latar gelap dengan sedikit jejak cahaya
+        ctx.globalCompositeOperation = "source-over";
+        ctx.globalAlpha = 1;
+        ctx.fillStyle = opts.background;
+        ctx.fillRect(0, 0, W, H);
+
+        // bintang berkelip
+        ctx.fillStyle = "#fff";
+        stars.forEach((s) => {
+            ctx.globalAlpha = 0.25 + 0.25 * Math.sin(frame / 50 + s.p);
+            ctx.fillRect(s.x, s.y, s.r, s.r);
+        });
+        ctx.globalAlpha = 1;
+
+        // huruf (roket, flash, teks)
+        letters.forEach((l) => l.step());
+
+        // kembang api tambahan di latar setelah semua huruf muncul
+        if (allIdle()) {
+            ambientTimer++;
+            if (ambientTimer > 55) {
+                ambientTimer = 0;
+                explode(rand(W * 0.1, W * 0.9), rand(H * 0.08, H * 0.35), rand(0, 360), 34);
+            }
+        }
+
+        // partikel
+        ctx.globalCompositeOperation = "lighter";
+        for (let i = particles.length - 1; i >= 0; i--) {
+            const p = particles[i];
+            p.update();
+            if (p.life <= 0 || p.y > H + 20) {
+                particles.splice(i, 1);
+            } else {
+                p.draw();
+            }
+        }
+        ctx.globalCompositeOperation = "source-over";
+        ctx.globalAlpha = 1;
+
+        requestAnimationFrame(loop);
+    }
+
+    function restart() {
+        particles = [];
+        ambientTimer = 0;
+        ctx.fillStyle = "#050508";
+        ctx.fillRect(0, 0, W, H);
+        layout();
+    }
+
+    // ==========================================================
+    // EVENT & START
+    // ==========================================================
+    document.getElementById("replay").addEventListener("click", restart);
+
+    let resizeTimer;
+    window.addEventListener("resize", () => {
+        clearTimeout(resizeTimer);
+        resizeTimer = setTimeout(restart, 250);
+    });
+
+    // tunggu font Poppins siap supaya pengukuran huruf akurat
+    const start = () => { layout(); loop(); };
+    if (document.fonts && document.fonts.load) {
+        Promise.race([
+            document.fonts.load('600 50px "Poppins"'),
+            new Promise((res) => setTimeout(res, 1500))
+        ]).catch(() => {}).then(start);
+    } else {
+        start();
+    }
+})();
+</script>
+</body>
+</html>
